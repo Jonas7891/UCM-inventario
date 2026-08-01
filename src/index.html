@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+<title>Universal de Camisas para Motores</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-icon">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="1.6"/>
+            <path d="M19.4 13.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V19.4a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H4.6a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 6.2 8.6a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H10.6a1.65 1.65 0 0 0 1-1.51V2.6a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V8.6c.14.62.62 1.11 1.24 1.24h.09a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" stroke="currentColor" stroke-width="1.4"/>
+          </svg>
+        </span>
+        <div class="brand-text">
+          <h1>Universal de Camisas para Motores</h1>
+          <p>Sistema de Inventario &amp; Gestión de Precios</p>
+        </div>
+      </div>
+      <button id="btnAdd" class="btn btn-primary">
+        <span class="plus">+</span> Agregar Referencia
+      </button>
+    </header>
+
+    <div class="content">
+      <main class="main-panel">
+        <div class="search-bar">
+          <svg class="icon-search" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8"/>
+            <path d="M21 21l-4.3-4.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+          <input id="searchInput" type="text" placeholder="Buscar por referencia o descripción..." autocomplete="off" />
+          <span id="resultCount" class="result-count">0 resultados</span>
+        </div>
+
+        <div class="table-wrap">
+          <table class="inventory-table">
+            <thead>
+              <tr>
+                <th>Referencia</th>
+                <th>Descripción</th>
+                <th>Cantidad</th>
+                <th>Precio Unitario</th>
+                <th>Precio + IVA 19%</th>
+                <th>Precio Público (+49%)</th>
+                <th>Precio con Factura (+10%)</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+          <div id="emptyState" class="empty-state hidden">No hay referencias que coincidan con la búsqueda.</div>
+        </div>
+
+        <div class="table-footer">
+          <span id="shownCount">0 referencias mostradas</span>
+        </div>
+      </main>
+
+      <aside class="sidebar">
+        <div class="panel panel-warning">
+          <div class="panel-header">
+            <span class="warn-icon">
+              <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 3.5 1.5 21.5h21L12 3.5Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+                <path d="M12 10v4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+                <circle cx="12" cy="18" r="0.9" fill="currentColor"/>
+              </svg>
+            </span>
+            <span class="panel-title">Stock Bajo</span>
+            <span id="lowStockBadge" class="badge">0</span>
+          </div>
+          <p class="panel-subtitle">Referencias con menos de 6 unidades</p>
+          <div id="lowStockList" class="low-stock-list"></div>
+        </div>
+
+        <div class="panel panel-summary">
+          <div class="panel-header">
+            <span class="panel-title">Resumen</span>
+          </div>
+          <div class="summary-row"><span>Total referencias</span><strong id="sumRefs">0</strong></div>
+          <div class="summary-row"><span>Total unidades</span><strong id="sumUnits">0</strong></div>
+          <div class="summary-row"><span>Valor inventario</span><strong id="sumValue">$0</strong></div>
+          <div class="summary-row"><span>En stock bajo</span><strong id="sumLowStock" class="text-red">0</strong></div>
+          <div class="summary-row"><span>Margen de ganancia (49%)</span><strong id="sumMargin" class="text-amber">$0</strong></div>
+          <div class="summary-row"><span>Ganancias totales</span><strong id="sumProfit" class="text-green">$0</strong></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <div id="modalOverlay" class="modal-overlay hidden">
+    <div class="modal">
+      <h2 id="modalTitle">Agregar Referencia</h2>
+
+      <label for="fieldReferencia">Referencia</label>
+      <input id="fieldReferencia" type="text" placeholder="CAMISA-3" autocomplete="off" />
+
+      <label for="fieldDescripcion">Descripción</label>
+      <input id="fieldDescripcion" type="text" placeholder="motor de..." autocomplete="off" />
+
+      <div class="field-row">
+        <div class="field-col">
+          <label for="fieldCantidad">Cantidad</label>
+          <input id="fieldCantidad" type="number" min="0" step="1" placeholder="0" />
+        </div>
+        <div class="field-col">
+          <label for="fieldPrecio">Precio Unitario</label>
+          <input id="fieldPrecio" type="number" min="0" step="100" placeholder="0" />
+        </div>
+      </div>
+
+      <p id="modalError" class="modal-error hidden"></p>
+
+      <div class="modal-actions">
+        <button id="btnCancel" class="btn btn-secondary">Cancelar</button>
+        <button id="btnSave" class="btn btn-primary">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="dialogOverlay" class="modal-overlay hidden">
+    <div class="modal dialog-modal">
+      <h2 id="dialogTitle">Confirmar</h2>
+      <p id="dialogMessage" class="dialog-message"></p>
+      <div class="modal-actions">
+        <button id="dialogCancel" class="btn btn-secondary">Cancelar</button>
+        <button id="dialogConfirm" class="btn btn-primary">Aceptar</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
