@@ -7,8 +7,18 @@
   "license": "UNLICENSED",
   "scripts": {
     "start": "electron .",
+    "start:api": "node backend/server.js",
+    "dev:api": "node --watch backend/server.js",
     "dist": "electron-builder",
-    "dist:linux": "electron-builder --linux"
+    "dist:linux": "electron-builder --linux",
+    "dist:win": "electron-builder --win",
+    "dist:win:dir": "electron-builder --win --dir",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "sqlite3": "^5.1.7"
   },
   "devDependencies": {
     "electron": "^31.0.0",
@@ -26,18 +36,20 @@
       "src/**/*"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "forceCodeSigning": false,
+      "signAndEditExecutable": false
     },
     "linux": {
-      "target": ["AppImage", "deb"],
+      "target": ["AppImage"],
       "category": "Utility",
       "executableName": "universal-camisas-motores",
-      "icon": "build/icons",
       "desktop": {
         "Name": "Universal de Camisas para Motores",
         "Comment": "Sistema de inventario y gestión de precios",
         "Categories": ["Utility", "Office"]
-      }
+      },
+      "icon": "build/icons"
     },
     "nsis": {
       "oneClick": false,
