@@ -1,5 +1,72 @@
 'use strict';
 
+// Fallback para ejecución en navegador: si no estamos en Electron,
+// exponemos `window.api` usando la API REST disponible en el backend.
+if (typeof window.api === 'undefined') {
+  const API_BASE = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    ? 'http://localhost:3000'
+    : window.location.origin;
+
+  window.api = {
+    loadItems: async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/items`);
+        if (!res.ok) throw new Error('Error cargando items: ' + res.status);
+        return await res.json();
+      } catch (err) {
+        console.error(err);
+        return [];
+      }
+    },
+    saveItems: async (items) => {
+      try {
+        // Obtener items en servidor para sincronizar borrados/actualizaciones
+        const res = await fetch(`${API_BASE}/api/items`);
+        if (!res.ok) throw new Error('Error cargando items para sincronizar: ' + res.status);
+        const serverItems = await res.json();
+        const serverIds = serverItems.map(i => i.id);
+        const clientIds = items.map(i => i.id).filter(Boolean);
+
+        // Borrar los que ya no existen en el cliente
+        for (const id of serverIds) {
+          if (!clientIds.includes(id)) {
+            await fetch(`${API_BASE}/api/items/${id}`, { method: 'DELETE' });
+          }
+        }
+
+        // Actualizar / crear
+        for (const item of items) {
+          const payload = {
+            referencia: item.referencia,
+            descripcion: item.descripcion,
+            cantidad: Number(item.cantidad) || 0,
+            precioUnitario: Number(item.precioUnitario) || 0
+          };
+
+          if (item.id && serverIds.includes(item.id)) {
+            await fetch(`${API_BASE}/api/items/${item.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+          } else {
+            await fetch(`${API_BASE}/api/items`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+          }
+        }
+
+        return true;
+      } catch (err) {
+        console.error('saveItems fallback error', err);
+        return false;
+      }
+    }
+  };
+}
+
 // ---------- Estado ----------
 let items = [];
 let searchTerm = '';

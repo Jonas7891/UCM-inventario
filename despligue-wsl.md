@@ -135,7 +135,7 @@ docker logs -f ucm-inventario-api
 En el mismo WSL:
 
 ```bash
-curl http://localhost:3000/api/items
+curl http://  
 ```
 
 Si responde con JSON, el despliegue fue exitoso.
