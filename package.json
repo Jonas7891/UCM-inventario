@@ -18,6 +18,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
+    "pg": "^8.23.0",
     "sqlite3": "^5.1.7"
   },
   "devDependencies": {
@@ -41,13 +42,18 @@
       "signAndEditExecutable": false
     },
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Utility",
       "executableName": "universal-camisas-motores",
       "desktop": {
         "Name": "Universal de Camisas para Motores",
         "Comment": "Sistema de inventario y gestión de precios",
-        "Categories": ["Utility", "Office"]
+        "Categories": [
+          "Utility",
+          "Office"
+        ]
       },
       "icon": "build/icons"
     },

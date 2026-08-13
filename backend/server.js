@@ -1,111 +1,331 @@
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const { pool, initDatabase } = require('./db');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 app.use(cors());
 app.use(express.json());
 
-app.use(express.static(path.join(__dirname, '..', 'src')));
+// ==========================================
+// GET - Obtener todos los items
+// ==========================================
+app.get('/api/items', async (_req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT
+        id,
+        referencia,
+        descripcion,
+        cantidad,
+        "precioUnitario"
+       FROM items
+       ORDER BY id ASC`
+    );
 
-initDatabase();
-
-app.get('/api/items', (_req, res) => {
-  db.all('SELECT * FROM items ORDER BY id ASC', (err, rows) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    res.json(rows);
-  });
+    res.json(result.rows);
+  } catch (error) {
+    console.error('Error obteniendo items:', error);
+    res.status(500).json({
+      error: error.message
+    });
+  }
 });
 
-app.get('/api/items/:id', (req, res) => {
-  const { id } = req.params;
+// ==========================================
+// GET - Obtener item por ID
+// ==========================================
+app.get('/api/items/:id', async (req, res) => {
+  const id = Number(req.params.id);
 
-  db.get('SELECT * FROM items WHERE id = ?', [id], (err, row) => {
-    if (err) {
-      return res.status(500).json({ error: err.message });
-    }
-    if (!row) {
-      return res.status(404).json({ error: 'Item no encontrado' });
-    }
-    res.json(row);
-  });
-});
-
-app.post('/api/items', (req, res) => {
-  const { referencia, descripcion, cantidad, precioUnitario } = req.body;
-
-  if (!referencia || !descripcion) {
-    return res.status(400).json({ error: 'referencia y descripcion son obligatorios' });
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({
+      error: 'ID inválido'
+    });
   }
 
-  const qty = Number(cantidad) || 0;
-  const price = Number(precioUnitario) || 0;
+  try {
+    const result = await pool.query(
+      `SELECT
+        id,
+        referencia,
+        descripcion,
+        cantidad,
+        "precioUnitario"
+       FROM items
+       WHERE id = $1`,
+      [id]
+    );
 
-  db.run(
-    'INSERT INTO items (referencia, descripcion, cantidad, precioUnitario) VALUES (?, ?, ?, ?)',
-    [referencia.trim(), descripcion.trim(), qty, price],
-    function (err) {
-      if (err) {
-        return res.status(400).json({ error: err.message });
-      }
-
-      res.status(201).json({
-        id: this.lastID,
-        referencia: referencia.trim(),
-        descripcion: descripcion.trim(),
-        cantidad: qty,
-        precioUnitario: price
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Item no encontrado'
       });
     }
-  );
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error obteniendo item:', error);
+    res.status(500).json({
+      error: error.message
+    });
+  }
 });
 
-app.put('/api/items/:id', (req, res) => {
-  const { id } = req.params;
-  const { referencia, descripcion, cantidad, precioUnitario } = req.body;
+// ==========================================
+// POST - Crear item
+// ==========================================
+app.post('/api/items', async (req, res) => {
+  const {
+    referencia,
+    descripcion,
+    cantidad,
+    precioUnitario
+  } = req.body;
 
-  if (!referencia || !descripcion) {
-    return res.status(400).json({ error: 'referencia y descripcion son obligatorios' });
+  if (
+    typeof referencia !== 'string' ||
+    !referencia.trim()
+  ) {
+    return res.status(400).json({
+      error: 'La referencia es obligatoria'
+    });
   }
 
-  db.run(
-    'UPDATE items SET referencia = ?, descripcion = ?, cantidad = ?, precioUnitario = ? WHERE id = ?',
-    [referencia.trim(), descripcion.trim(), Number(cantidad) || 0, Number(precioUnitario) || 0, id],
-    function (err) {
-      if (err) {
-        return res.status(400).json({ error: err.message });
-      }
-      if (this.changes === 0) {
-        return res.status(404).json({ error: 'Item no encontrado' });
-      }
-      res.json({ id: Number(id), referencia: referencia.trim(), descripcion: descripcion.trim(), cantidad: Number(cantidad) || 0, precioUnitario: Number(precioUnitario) || 0 });
+  if (
+    typeof descripcion !== 'string' ||
+    !descripcion.trim()
+  ) {
+    return res.status(400).json({
+      error: 'La descripción es obligatoria'
+    });
+  }
+
+  const qty = Number(cantidad);
+  const price = Number(precioUnitario);
+
+  if (!Number.isFinite(qty) || qty < 0) {
+    return res.status(400).json({
+      error: 'La cantidad debe ser un número válido'
+    });
+  }
+
+  if (!Number.isFinite(price) || price < 0) {
+    return res.status(400).json({
+      error: 'El precio unitario debe ser un número válido'
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO items
+        (referencia, descripcion, cantidad, "precioUnitario")
+       VALUES ($1, $2, $3, $4)
+       RETURNING
+        id,
+        referencia,
+        descripcion,
+        cantidad,
+        "precioUnitario"`,
+      [
+        referencia.trim(),
+        descripcion.trim(),
+        Math.round(qty),
+        price
+      ]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (error) {
+    console.error('Error creando item:', error);
+
+    // Referencia duplicada
+    if (error.code === '23505') {
+      return res.status(409).json({
+        error: 'Ya existe una referencia con ese nombre'
+      });
     }
-  );
+
+    res.status(500).json({
+      error: error.message
+    });
+  }
 });
 
-app.delete('/api/items/:id', (req, res) => {
-  const { id } = req.params;
+// ==========================================
+// PUT - Actualizar item
+// ==========================================
+app.put('/api/items/:id', async (req, res) => {
+  const id = Number(req.params.id);
 
-  db.run('DELETE FROM items WHERE id = ?', [id], function (err) {
-    if (err) {
-      return res.status(500).json({ error: err.message });
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({
+      error: 'ID inválido'
+    });
+  }
+
+  const {
+    referencia,
+    descripcion,
+    cantidad,
+    precioUnitario
+  } = req.body;
+
+  if (
+    typeof referencia !== 'string' ||
+    !referencia.trim()
+  ) {
+    return res.status(400).json({
+      error: 'La referencia es obligatoria'
+    });
+  }
+
+  if (
+    typeof descripcion !== 'string' ||
+    !descripcion.trim()
+  ) {
+    return res.status(400).json({
+      error: 'La descripción es obligatoria'
+    });
+  }
+
+  const qty = Number(cantidad);
+  const price = Number(precioUnitario);
+
+  if (!Number.isFinite(qty) || qty < 0) {
+    return res.status(400).json({
+      error: 'La cantidad debe ser un número válido'
+    });
+  }
+
+  if (!Number.isFinite(price) || price < 0) {
+    return res.status(400).json({
+      error: 'El precio unitario debe ser un número válido'
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `UPDATE items
+       SET
+        referencia = $1,
+        descripcion = $2,
+        cantidad = $3,
+        "precioUnitario" = $4
+       WHERE id = $5
+       RETURNING
+        id,
+        referencia,
+        descripcion,
+        cantidad,
+        "precioUnitario"`,
+      [
+        referencia.trim(),
+        descripcion.trim(),
+        Math.round(qty),
+        price,
+        id
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Item no encontrado'
+      });
     }
-    if (this.changes === 0) {
-      return res.status(404).json({ error: 'Item no encontrado' });
+
+    res.json(result.rows[0]);
+  } catch (error) {
+    console.error('Error actualizando item:', error);
+
+    if (error.code === '23505') {
+      return res.status(409).json({
+        error: 'Ya existe una referencia con ese nombre'
+      });
     }
-    res.json({ success: true, id: Number(id) });
-  });
+
+    res.status(500).json({
+      error: error.message
+    });
+  }
 });
 
-app.get('/', (_req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'src', 'index.html'));
+// ==========================================
+// DELETE - Eliminar item
+// ==========================================
+app.delete('/api/items/:id', async (req, res) => {
+  const id = Number(req.params.id);
+
+  if (!Number.isInteger(id)) {
+    return res.status(400).json({
+      error: 'ID inválido'
+    });
+  }
+
+  try {
+    const result = await pool.query(
+      `DELETE FROM items
+       WHERE id = $1
+       RETURNING id`,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({
+        error: 'Item no encontrado'
+      });
+    }
+
+    res.json({
+      success: true,
+      id: result.rows[0].id
+    });
+  } catch (error) {
+    console.error('Error eliminando item:', error);
+
+    res.status(500).json({
+      error: error.message
+    });
+  }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`API escuchando en http://0.0.0.0:${PORT}`);
+// ==========================================
+// Health check
+// ==========================================
+app.get('/api/health', async (_req, res) => {
+  try {
+    await pool.query('SELECT 1');
+
+    res.json({
+      status: 'ok',
+      database: 'connected'
+    });
+  } catch (error) {
+    console.error('Error en health check:', error);
+
+    res.status(503).json({
+      status: 'error',
+      database: 'disconnected',
+      error: error.message
+    });
+  }
 });
+
+// ==========================================
+// Iniciar servidor
+// ==========================================
+async function startServer() {
+  try {
+    await initDatabase();
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`API escuchando en http://0.0.0.0:${PORT}`);
+    });
+  } catch (error) {
+    console.error('No se pudo iniciar el servidor:', error);
+    process.exit(1);
+  }
+}
+
+startServer();

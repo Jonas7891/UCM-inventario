@@ -1,57 +1,63 @@
-const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
-const fs = require('fs');
+const { Pool } = require('pg');
 
-const dbDir = path.join(__dirname, '..', 'data');
-const dbPath = path.join(dbDir, 'inventario.db');
-
-fs.mkdirSync(dbDir, { recursive: true });
-
-const db = new sqlite3.Database(dbPath, (err) => {
-  if (err) {
-    console.error('Error al abrir la base de datos:', err.message);
-    throw err;
-  }
-  console.log('Conectado a SQLite:', dbPath);
+const pool = new Pool({
+  host: process.env.DB_HOST || 'localhost',
+  port: Number(process.env.DB_PORT) || 5432,
+  database: process.env.DB_NAME || 'inventario',
+  user: process.env.DB_USER || 'inventario_user',
+  password: process.env.DB_PASSWORD || 'inventario_pass'
 });
 
-function initDatabase() {
-  db.serialize(() => {
-    db.run(`
+async function initDatabase() {
+  try {
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS items (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id SERIAL PRIMARY KEY,
         referencia TEXT NOT NULL UNIQUE,
         descripcion TEXT NOT NULL,
         cantidad INTEGER NOT NULL DEFAULT 0,
-        precioUnitario REAL NOT NULL DEFAULT 0
+        "precioUnitario" REAL NOT NULL DEFAULT 0
       )
     `);
 
-    db.get('SELECT COUNT(*) as total FROM items', (err, row) => {
-      if (err) {
-        console.error('Error consultando items:', err.message);
-        return;
-      }
+    const result = await pool.query(
+      'SELECT COUNT(*) AS total FROM items'
+    );
 
-      if (row.total === 0) {
-        const seedItems = [
-          { referencia: 'CAMISA-1', descripcion: 'motor de honda', cantidad: 5, precioUnitario: 54000 },
-          { referencia: 'CAMISA-2', descripcion: 'motor ford', cantidad: 6, precioUnitario: 25000 }
-        ];
+    if (Number(result.rows[0].total) === 0) {
+      await pool.query(
+        `INSERT INTO items
+        (referencia, descripcion, cantidad, "precioUnitario")
+        VALUES
+        ($1, $2, $3, $4),
+        ($5, $6, $7, $8)`,
+        [
+          'CAMISA-1',
+          'motor de honda',
+          5,
+          54000,
+          'CAMISA-2',
+          'motor ford',
+          6,
+          25000
+        ]
+      );
 
-        const stmt = db.prepare(
-          'INSERT INTO items (referencia, descripcion, cantidad, precioUnitario) VALUES (?, ?, ?, ?)'
-        );
+      console.log('Datos iniciales insertados');
+    }
 
-        seedItems.forEach((item) => {
-          stmt.run(item.referencia, item.descripcion, item.cantidad, item.precioUnitario);
-        });
+    console.log('Conectado a PostgreSQL');
+  } catch (error) {
+    console.error(
+      'Error inicializando PostgreSQL:',
+      error.message
+    );
 
-        stmt.finalize();
-        console.log('Datos iniciales insertados en la base de datos.');
-      }
-    });
-  });
+    throw error;
+  }
 }
 
-module.exports = { db, initDatabase };
+module.exports = {
+  pool,
+  initDatabase
+};

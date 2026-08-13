@@ -1,7 +1,7 @@
 services:
 
   postgres:
-    image: postgres:16
+    image: postgres:16-alpine
     container_name: ucm-inventario-db
     restart: unless-stopped
 
@@ -16,6 +16,12 @@ services:
     networks:
       - inventario-network
 
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
 
   inventario-api:
     build:
@@ -23,7 +29,6 @@ services:
       dockerfile: Dockerfile
 
     container_name: ucm-inventario-api
-
     restart: unless-stopped
 
     environment:
@@ -39,10 +44,8 @@ services:
       - "3000:3000"
 
     depends_on:
-      - postgres
-
-    volumes:
-      - ./data:/app/data
+      postgres:
+        condition: service_healthy
 
     networks:
       - inventario-network
@@ -54,7 +57,6 @@ services:
       dockerfile: Dockerfile.frontend
 
     container_name: ucm-inventario-frontend
-
     restart: unless-stopped
 
     ports:
@@ -70,9 +72,12 @@ services:
 volumes:
 
   postgres_data:
+    external: true
+    name: ucm-inventario-postgres-data
 
 
 networks:
 
   inventario-network:
-    driver: bridge
+    external: true
+    name: ucm-inventario-network

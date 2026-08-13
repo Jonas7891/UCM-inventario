@@ -1,38 +1,7 @@
 'use strict';
 
-/*
- * ============================================================
- * UNIVERSAL DE CAMISAS PARA MOTORES
- * Frontend web
- *
- * El frontend se comunica con el backend mediante:
- *
- *   /api/items
- *
- * Nginx se encargará de enviar esas peticiones al backend.
- *
- * Por eso NO usamos:
- *
- *   http://localhost:3000
- *
- * Esto permite acceder desde:
- *
- *   http://localhost:8080
- *   http://192.168.x.x:8080
- *   http://IP-DE-LA-VM:8080
- * ============================================================
- */
-
-
 // ============================================================
-// CONFIGURACIÓN DE LA API
-// ============================================================
-
-const API_URL = '/api/items';
-
-
-// ============================================================
-// ESTADO DE LA APLICACIÓN
+// Estado
 // ============================================================
 
 let items = [];
@@ -42,445 +11,294 @@ let editingId = null;
 let dialogResolver = null;
 let dialogTriggerElement = null;
 
-
-// ============================================================
-// CONFIGURACIÓN DEL INVENTARIO
-// ============================================================
-
-// Stock bajo: menos de 6 unidades
+// Umbral de stock bajo
 const LOW_STOCK_THRESHOLD = 6;
 
-// Porcentajes utilizados en el resumen
+// Porcentajes del panel Resumen
 const MARGEN_PCT = 0.49;
 const GANANCIA_PCT = 0.51;
 
 
 // ============================================================
-// FUNCIONES DE API
+// API
 // ============================================================
 
-/**
- * Obtener todos los items.
+/*
+ * IMPORTANTE:
+ *
+ * Ya no usamos:
+ *
+ * window.api.loadItems()
+ * window.api.saveItems()
+ *
+ * Eso era para Electron.
+ *
+ * Ahora usamos fetch('/api/...').
+ *
+ * Nginx recibe /api y lo envía al backend Express.
  */
-async function apiGetItems() {
 
-  const response = await fetch(API_URL, {
-    method: 'GET',
-    headers: {
-      'Accept': 'application/json'
-    }
-  });
+// Obtener todos los items
+async function apiGetItems() {
+  const response = await fetch('/api/items');
 
   if (!response.ok) {
-
-    let errorMessage = `Error HTTP ${response.status}`;
-
-    try {
-      const data = await response.json();
-
-      if (data.error) {
-        errorMessage = data.error;
-      }
-
-    } catch (_) {
-      // La respuesta no era JSON.
-    }
-
-    throw new Error(errorMessage);
+    throw new Error('No se pudieron cargar los items');
   }
 
   return await response.json();
 }
 
 
-/**
- * Crear un item.
- */
+// Crear un item
 async function apiCreateItem(item) {
-
-  const response = await fetch(API_URL, {
+  const response = await fetch('/api/items', {
     method: 'POST',
 
     headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
+      'Content-Type': 'application/json'
     },
 
-    body: JSON.stringify(item)
+    body: JSON.stringify({
+      referencia: item.referencia,
+      descripcion: item.descripcion,
+      cantidad: item.cantidad,
+      precioUnitario: item.precioUnitario
+    })
   });
 
-
-  let data = null;
-
-  try {
-    data = await response.json();
-  } catch (_) {
-    data = null;
-  }
-
+  const data = await response.json();
 
   if (!response.ok) {
-
-    throw new Error(
-      data?.error ||
-      `Error HTTP ${response.status}`
-    );
+    throw new Error(data.error || 'No se pudo crear el item');
   }
-
 
   return data;
 }
 
 
-/**
- * Actualizar un item.
- */
-async function apiUpdateItem(id, item) {
-
-  const response = await fetch(`${API_URL}/${id}`, {
+// Actualizar un item
+async function apiUpdateItem(item) {
+  const response = await fetch(`/api/items/${item.id}`, {
     method: 'PUT',
 
     headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
+      'Content-Type': 'application/json'
     },
 
-    body: JSON.stringify(item)
+    body: JSON.stringify({
+      referencia: item.referencia,
+      descripcion: item.descripcion,
+      cantidad: item.cantidad,
+      precioUnitario: item.precioUnitario
+    })
   });
 
-
-  let data = null;
-
-  try {
-    data = await response.json();
-  } catch (_) {
-    data = null;
-  }
-
+  const data = await response.json();
 
   if (!response.ok) {
-
-    throw new Error(
-      data?.error ||
-      `Error HTTP ${response.status}`
-    );
+    throw new Error(data.error || 'No se pudo actualizar el item');
   }
-
 
   return data;
 }
 
 
-/**
- * Eliminar un item.
- */
+// Eliminar un item
 async function apiDeleteItem(id) {
-
-  const response = await fetch(`${API_URL}/${id}`, {
-    method: 'DELETE',
-
-    headers: {
-      'Accept': 'application/json'
-    }
+  const response = await fetch(`/api/items/${id}`, {
+    method: 'DELETE'
   });
 
-
-  let data = null;
-
-  try {
-    data = await response.json();
-  } catch (_) {
-    data = null;
-  }
-
+  const data = await response.json();
 
   if (!response.ok) {
-
-    throw new Error(
-      data?.error ||
-      `Error HTTP ${response.status}`
-    );
+    throw new Error(data.error || 'No se pudo eliminar el item');
   }
-
 
   return data;
 }
 
 
 // ============================================================
-// CÁLCULO DE PRECIOS
+// Cálculo de precios
 // ============================================================
 
 /*
  * Cadena:
  *
- * Precio unitario
- *      ↓
- * +19% IVA
- *      ↓
- * +49% precio público
- *      ↓
- * +10% precio con factura
+ * Unitario
+ *   ↓ +19% IVA
+ * IVA
+ *   ↓ +49%
+ * Precio público
+ *   ↓ +10%
+ * Precio con factura
  *
- * Se calcula sin redondear y solamente se redondea
- * el valor mostrado.
+ * Los cálculos se hacen sin redondear
+ * y solo se redondea al mostrar.
  */
 
 function calcPrices(unitario) {
-
   const iva = unitario * 1.19;
-
   const publicoRaw = iva * 1.49;
-
   const facturaRaw = publicoRaw * 1.10;
 
-
   return {
-
     iva: Math.round(iva),
-
     publico: Math.round(publicoRaw),
-
     factura: Math.round(facturaRaw)
-
   };
 }
 
 
 // ============================================================
-// FORMATO DE DINERO
+// Formato de moneda
 // ============================================================
 
 function formatCOP(n) {
-
-  const rounded = Math.round(Number(n) || 0);
+  const rounded = Math.round(n);
 
   return '$' + rounded.toLocaleString('es-CO');
 }
 
 
 // ============================================================
-// SEGURIDAD HTML
+// Seguridad HTML
 // ============================================================
 
 function escapeHtml(str) {
-
   const div = document.createElement('div');
 
-  div.textContent =
-    str == null
-      ? ''
-      : String(str);
+  div.textContent = str == null
+    ? ''
+    : String(str);
 
   return div.innerHTML;
 }
 
 
 // ============================================================
-// INICIALIZACIÓN
+// Inicialización
 // ============================================================
 
 async function init() {
-
   try {
-
-    console.log('Conectando con backend...');
-
     items = await apiGetItems();
-
-    console.log(
-      `Backend conectado. ${items.length} items encontrados.`
-    );
 
     render();
 
     bindStaticEvents();
 
+    console.log('Inventario cargado correctamente');
   } catch (error) {
+    console.error('Error inicializando aplicación:', error);
 
-    console.error(
-      'Error cargando inventario:',
-      error
+    showApplicationError(
+      'No se pudo conectar con el servidor del inventario. ' +
+      'Verifica que Docker esté funcionando.'
     );
-
-    showConnectionError(error);
   }
 }
 
 
 // ============================================================
-// ERROR DE CONEXIÓN
+// Error general de aplicación
 // ============================================================
 
-function showConnectionError(error) {
-
+function showApplicationError(message) {
   const tbody = document.getElementById('tableBody');
-
-  const emptyState =
-    document.getElementById('emptyState');
-
+  const emptyState = document.getElementById('emptyState');
 
   if (tbody) {
-
-    tbody.innerHTML = `
-      <tr>
-        <td colspan="8" style="text-align:center; padding:40px;">
-          <strong>No se pudo conectar con el servidor.</strong>
-          <br><br>
-          Verifica que Docker Compose esté funcionando.
-          <br>
-          <small>${escapeHtml(error.message)}</small>
-        </td>
-      </tr>
-    `;
+    tbody.innerHTML = '';
   }
 
-
   if (emptyState) {
-
-    emptyState.classList.add('hidden');
+    emptyState.textContent = message;
+    emptyState.classList.remove('hidden');
   }
 }
 
 
 // ============================================================
-// FILTRADO
+// Filtrado
 // ============================================================
 
 function filteredItems() {
-
-  const term =
-    searchTerm
-      .trim()
-      .toLowerCase();
-
+  const term = searchTerm.trim().toLowerCase();
 
   if (!term) {
-
     return items;
   }
 
+  return items.filter(it =>
+    String(it.referencia || '')
+      .toLowerCase()
+      .includes(term) ||
 
-  return items.filter(item => {
-
-    const referencia =
-      String(item.referencia || '')
-        .toLowerCase();
-
-    const descripcion =
-      String(item.descripcion || '')
-        .toLowerCase();
-
-
-    return (
-      referencia.includes(term) ||
-      descripcion.includes(term)
-    );
-  });
+    String(it.descripcion || '')
+      .toLowerCase()
+      .includes(term)
+  );
 }
 
 
 // ============================================================
-// RENDER PRINCIPAL
+// Render general
 // ============================================================
 
 function render() {
-
   const list = filteredItems();
 
   renderTable(list);
-
   renderSidebar();
 
-
-  const resultCount =
-    document.getElementById('resultCount');
-
-  const shownCount =
-    document.getElementById('shownCount');
-
+  const resultCount = document.getElementById('resultCount');
 
   if (resultCount) {
-
     resultCount.textContent =
-      `${list.length} resultado${
-        list.length === 1 ? '' : 's'
-      }`;
+      `${list.length} resultado${list.length === 1 ? '' : 's'}`;
   }
 
+  const shownCount = document.getElementById('shownCount');
 
   if (shownCount) {
-
     shownCount.textContent =
-      `${list.length} referencia${
-        list.length === 1 ? '' : 's'
-      } mostrada${
-        list.length === 1 ? '' : 's'
-      }`;
+      `${list.length} referencia${list.length === 1 ? '' : 's'} ` +
+      `mostrada${list.length === 1 ? '' : 's'}`;
   }
 }
 
 
 // ============================================================
-// TABLA
+// Render tabla
 // ============================================================
 
 function renderTable(list) {
-
-  const tbody =
-    document.getElementById('tableBody');
-
-  const emptyState =
-    document.getElementById('emptyState');
-
-
-  if (!tbody) return;
-
+  const tbody = document.getElementById('tableBody');
+  const emptyState = document.getElementById('emptyState');
 
   tbody.innerHTML = '';
 
-
   if (list.length === 0) {
-
-    if (emptyState) {
-      emptyState.classList.remove('hidden');
-    }
-
+    emptyState.classList.remove('hidden');
     return;
   }
 
-
-  if (emptyState) {
-    emptyState.classList.add('hidden');
-  }
-
+  emptyState.classList.add('hidden');
 
   list.forEach(item => {
+    const { iva, publico, factura } =
+      calcPrices(Number(item.precioUnitario) || 0);
 
-    const cantidad =
-      Number(item.cantidad) || 0;
+    const cantidad = Number(item.cantidad) || 0;
 
-    const precioUnitario =
-      Number(item.precioUnitario) || 0;
+    const isLow = cantidad < LOW_STOCK_THRESHOLD;
 
-
-    const {
-      iva,
-      publico,
-      factura
-    } = calcPrices(precioUnitario);
-
-
-    const isLow =
-      cantidad < LOW_STOCK_THRESHOLD;
-
-
-    const tr =
-      document.createElement('tr');
-
+    const tr = document.createElement('tr');
 
     tr.innerHTML = `
-
       <td class="cell-ref">
         ${escapeHtml(item.referencia)}
       </td>
@@ -490,13 +308,11 @@ function renderTable(list) {
       </td>
 
       <td>
-
         <span
           class="qty-cell ${isLow ? 'qty-low' : ''}"
           data-id="${item.id}"
           title="Clic para editar cantidad"
         >
-
           <span class="qty-value">
             ${cantidad}
           </span>
@@ -504,34 +320,26 @@ function renderTable(list) {
           <span class="qty-caret">
             ▾
           </span>
-
         </span>
-
       </td>
-
 
       <td>
-        ${formatCOP(precioUnitario)}
+        ${formatCOP(item.precioUnitario)}
       </td>
-
 
       <td>
         ${formatCOP(iva)}
       </td>
 
-
       <td class="text-green">
         ${formatCOP(publico)}
       </td>
-
 
       <td class="text-blue">
         ${formatCOP(factura)}
       </td>
 
-
       <td>
-
         <div class="cell-actions">
 
           <button
@@ -540,7 +348,6 @@ function renderTable(list) {
           >
             EDITAR
           </button>
-
 
           <button
             class="btn-delete"
@@ -551,221 +358,124 @@ function renderTable(list) {
           </button>
 
         </div>
-
       </td>
-
     `;
 
-
     tbody.appendChild(tr);
-
   });
 }
 
 
 // ============================================================
-// PANEL LATERAL
+// Sidebar
 // ============================================================
 
 function renderSidebar() {
+  const low = items.filter(
+    it => Number(it.cantidad) < LOW_STOCK_THRESHOLD
+  );
 
-  const low =
-    items.filter(item => {
-
-      return (
-        Number(item.cantidad) || 0
-      ) < LOW_STOCK_THRESHOLD;
-
-    });
-
-
-  const lowStockBadge =
-    document.getElementById('lowStockBadge');
+  document.getElementById('lowStockBadge').textContent =
+    low.length;
 
   const lowList =
     document.getElementById('lowStockList');
 
+  lowList.innerHTML = low.map(it => `
+    <div class="low-stock-item">
 
-  if (lowStockBadge) {
+      <div>
+        <div class="low-ref">
+          ${escapeHtml(it.referencia)}
+        </div>
 
-    lowStockBadge.textContent =
-      low.length;
-  }
+        <div class="low-desc">
+          ${escapeHtml(it.descripcion)}
+        </div>
+      </div>
 
+      <div class="low-units">
+        ${Number(it.cantidad) || 0} uds
+      </div>
 
-  if (lowList) {
-
-    lowList.innerHTML =
-      low.map(item => {
-
-        const cantidad =
-          Number(item.cantidad) || 0;
-
-
-        return `
-
-          <div class="low-stock-item">
-
-            <div>
-
-              <div class="low-ref">
-                ${escapeHtml(item.referencia)}
-              </div>
-
-              <div class="low-desc">
-                ${escapeHtml(item.descripcion)}
-              </div>
-
-            </div>
-
-            <div class="low-units">
-              ${cantidad} uds
-            </div>
-
-          </div>
-
-        `;
-
-      }).join('') ||
-
-      '<p class="empty-note">Sin referencias en stock bajo</p>';
-  }
+    </div>
+  `).join('') ||
+  '<p class="empty-note">Sin referencias en stock bajo</p>';
 
 
-  // ----------------------------------------------------------
-  // RESUMEN
-  // ----------------------------------------------------------
+  // Resumen
 
-  const totalRefs =
-    items.length;
+  const totalRefs = items.length;
 
+  const totalUnits = items.reduce(
+    (sum, item) =>
+      sum + (Number(item.cantidad) || 0),
+    0
+  );
 
-  const totalUnits =
-    items.reduce(
-      (sum, item) =>
-        sum + (Number(item.cantidad) || 0),
-      0
-    );
+  const totalValue = items.reduce(
+    (sum, item) =>
+      sum +
+      (Number(item.cantidad) || 0) *
+      (Number(item.precioUnitario) || 0),
+    0
+  );
 
+  const margen = totalValue * MARGEN_PCT;
 
-  const totalValue =
-    items.reduce(
-      (sum, item) => {
-
-        const cantidad =
-          Number(item.cantidad) || 0;
-
-        const precio =
-          Number(item.precioUnitario) || 0;
-
-        return sum + cantidad * precio;
-
-      },
-      0
-    );
+  const ganancia = totalValue * GANANCIA_PCT;
 
 
-  const margen =
-    totalValue * MARGEN_PCT;
+  document.getElementById('sumRefs').textContent =
+    totalRefs;
 
+  document.getElementById('sumUnits').textContent =
+    totalUnits;
 
-  const ganancia =
-    totalValue * GANANCIA_PCT;
+  document.getElementById('sumValue').textContent =
+    formatCOP(totalValue);
 
+  document.getElementById('sumLowStock').textContent =
+    low.length;
 
-  const sumRefs =
-    document.getElementById('sumRefs');
+  document.getElementById('sumMargin').textContent =
+    formatCOP(margen);
 
-  const sumUnits =
-    document.getElementById('sumUnits');
-
-  const sumValue =
-    document.getElementById('sumValue');
-
-  const sumLowStock =
-    document.getElementById('sumLowStock');
-
-  const sumMargin =
-    document.getElementById('sumMargin');
-
-  const sumProfit =
-    document.getElementById('sumProfit');
-
-
-  if (sumRefs) {
-    sumRefs.textContent = totalRefs;
-  }
-
-
-  if (sumUnits) {
-    sumUnits.textContent = totalUnits;
-  }
-
-
-  if (sumValue) {
-    sumValue.textContent =
-      formatCOP(totalValue);
-  }
-
-
-  if (sumLowStock) {
-    sumLowStock.textContent =
-      low.length;
-  }
-
-
-  if (sumMargin) {
-    sumMargin.textContent =
-      formatCOP(margen);
-  }
-
-
-  if (sumProfit) {
-    sumProfit.textContent =
-      formatCOP(ganancia);
-  }
+  document.getElementById('sumProfit').textContent =
+    formatCOP(ganancia);
 }
 
 
 // ============================================================
-// EDICIÓN RÁPIDA DE CANTIDAD
+// Edición rápida de cantidad
 // ============================================================
 
 function startQuantityEdit(id) {
+  const item = items.find(
+    i => Number(i.id) === Number(id)
+  );
 
-  const item =
-    items.find(i => i.id === id);
-
-
-  if (!item) return;
-
-
-  const cell =
-    document.querySelector(
-      `.qty-cell[data-id="${id}"]`
-    );
-
-
-  if (
-    !cell ||
-    cell.classList.contains('editing')
-  ) {
+  if (!item) {
     return;
   }
 
+  const cell = document.querySelector(
+    `.qty-cell[data-id="${id}"]`
+  );
+
+  if (!cell || cell.classList.contains('editing')) {
+    return;
+  }
 
   cell.classList.add('editing');
 
-
   cell.innerHTML = `
-
     <button
       type="button"
       class="qty-btn qty-dec"
     >
       −
     </button>
-
 
     <input
       type="number"
@@ -775,158 +485,124 @@ function startQuantityEdit(id) {
       value="${Number(item.cantidad) || 0}"
     />
 
-
     <button
       type="button"
       class="qty-btn qty-inc"
     >
       +
     </button>
-
   `;
-
 
   const input =
     cell.querySelector('.qty-input');
-
 
   input.focus();
   input.select();
 
 
-  let committed = false;
-
-
+  // Guardar cantidad en PostgreSQL
   const commit = async () => {
-
-    if (committed) return;
-
-    committed = true;
-
-
-    const num =
-      Number(input.value);
-
+    const num = Number(input.value);
 
     if (
       Number.isNaN(num) ||
       num < 0
     ) {
-
       render();
-
       return;
     }
 
+    const newQuantity = Math.round(num);
 
-    const cantidad =
-      Math.round(num);
+    // No hacemos saveItems.
+    // Ahora actualizamos directamente el item
+    // mediante PUT /api/items/:id.
 
+    const updatedItem = {
+      ...item,
+      cantidad: newQuantity
+    };
 
     try {
+      const savedItem =
+        await apiUpdateItem(updatedItem);
 
-      const updated =
-        await apiUpdateItem(
-          item.id,
-          {
-            referencia: item.referencia,
-            descripcion: item.descripcion,
-            cantidad,
-            precioUnitario:
-              Number(item.precioUnitario) || 0
-          }
-        );
-
-
-      Object.assign(
-        item,
-        updated
+      const index = items.findIndex(
+        i => Number(i.id) === Number(id)
       );
 
+      if (index !== -1) {
+        items[index] = savedItem;
+      }
 
       render();
 
     } catch (error) {
-
       console.error(
         'Error actualizando cantidad:',
         error
       );
 
-
-      await showModalError(
-        'No se pudo actualizar la cantidad.\n\n' +
+      alert(
+        'No se pudo actualizar la cantidad: ' +
         error.message
       );
-
 
       render();
     }
   };
 
 
-  cell
-    .querySelector('.qty-dec')
-    .addEventListener(
-      'click',
-      event => {
+  // Botón -
+  cell.querySelector('.qty-dec')
+    .addEventListener('click', e => {
 
-        event.stopPropagation();
+      e.stopPropagation();
 
-        input.value =
-          Math.max(
-            0,
-            Number(input.value || 0) - 1
-          );
-      }
-    );
+      input.value = Math.max(
+        0,
+        Number(input.value || 0) - 1
+      );
+    });
 
 
-  cell
-    .querySelector('.qty-inc')
-    .addEventListener(
-      'click',
-      event => {
+  // Botón +
+  cell.querySelector('.qty-inc')
+    .addEventListener('click', e => {
 
-        event.stopPropagation();
+      e.stopPropagation();
 
-        input.value =
-          Number(input.value || 0) + 1;
-      }
-    );
+      input.value =
+        Number(input.value || 0) + 1;
+    });
 
 
+  // Evitar que el click propague
   input.addEventListener(
     'click',
-    event => {
-      event.stopPropagation();
-    }
+    e => e.stopPropagation()
   );
 
 
+  // Enter = guardar
   input.addEventListener(
     'keydown',
-    event => {
+    e => {
 
-      if (event.key === 'Enter') {
-
-        event.preventDefault();
-
+      if (e.key === 'Enter') {
+        e.preventDefault();
         commit();
       }
 
-
-      if (event.key === 'Escape') {
-
-        committed = true;
-
+      if (e.key === 'Escape') {
+        e.preventDefault();
         render();
       }
-
     }
   );
 
 
+  // Perder foco = guardar
   input.addEventListener(
     'blur',
     commit
@@ -935,13 +611,11 @@ function startQuantityEdit(id) {
 
 
 // ============================================================
-// MODAL AGREGAR / EDITAR
+// Modal Agregar / Editar
 // ============================================================
 
 function openModal(id = null) {
-
   editingId = id;
-
 
   const modalTitle =
     document.getElementById('modalTitle');
@@ -958,39 +632,32 @@ function openModal(id = null) {
   const priceInput =
     document.getElementById('fieldPrecio');
 
-  const modalError =
-    document.getElementById('modalError');
 
-
-  if (modalError) {
-    modalError.classList.add('hidden');
-  }
+  document
+    .getElementById('modalError')
+    .classList.add('hidden');
 
 
   if (id !== null) {
+    const item = items.find(
+      i => Number(i.id) === Number(id)
+    );
 
-    const item =
-      items.find(i => i.id === id);
-
-
-    if (!item) return;
-
+    if (!item) {
+      return;
+    }
 
     modalTitle.textContent =
       'Editar Referencia';
 
-
     refInput.value =
       item.referencia;
-
 
     descInput.value =
       item.descripcion;
 
-
     qtyInput.value =
       item.cantidad;
-
 
     priceInput.value =
       item.precioUnitario;
@@ -1000,89 +667,63 @@ function openModal(id = null) {
     modalTitle.textContent =
       'Agregar Referencia';
 
-
     refInput.value = '';
-
     descInput.value = '';
-
     qtyInput.value = '';
-
     priceInput.value = '';
   }
 
 
   document
     .getElementById('modalOverlay')
-    .classList
-    .remove('hidden');
+    .classList.remove('hidden');
 
 
   window.setTimeout(() => {
-
     refInput.focus();
-
     refInput.select();
-
   }, 0);
 }
 
 
 // ============================================================
-// CERRAR MODAL
+// Cerrar modal
 // ============================================================
 
 function closeModal() {
-
-  const overlay =
-    document.getElementById('modalOverlay');
-
-
-  if (overlay) {
-
-    overlay
-      .classList
-      .add('hidden');
-  }
-
+  document
+    .getElementById('modalOverlay')
+    .classList.add('hidden');
 
   editingId = null;
 }
 
 
 // ============================================================
-// ERROR DEL MODAL
+// Error modal
 // ============================================================
 
-function showModalError(message) {
-
+async function showModalError(msg) {
   return showDialog({
-
     title: 'Advertencia',
-
-    message,
-
+    message: msg,
     confirmText: 'Aceptar',
-
     cancelText: 'Cancelar',
-
     type: 'info'
-
   });
 }
 
 
 // ============================================================
-// GUARDAR FORMULARIO
+// Guardar modal
 // ============================================================
 
 async function saveModal() {
-
   const referencia =
     document
       .getElementById('fieldReferencia')
       .value
       .trim();
-
 
   const descripcion =
     document
@@ -1090,14 +731,12 @@ async function saveModal() {
       .value
       .trim();
 
-
   const cantidad =
     Number(
       document
         .getElementById('fieldCantidad')
         .value
     );
-
 
   const precioUnitario =
     Number(
@@ -1107,12 +746,9 @@ async function saveModal() {
     );
 
 
-  // ----------------------------------------------------------
-  // VALIDACIONES
-  // ----------------------------------------------------------
+  // Validaciones
 
   if (!referencia || !descripcion) {
-
     await showModalError(
       'Completa la referencia y la descripción.'
     );
@@ -1125,7 +761,6 @@ async function saveModal() {
     Number.isNaN(cantidad) ||
     cantidad < 0
   ) {
-
     await showModalError(
       'La cantidad debe ser un número válido.'
     );
@@ -1138,7 +773,6 @@ async function saveModal() {
     Number.isNaN(precioUnitario) ||
     precioUnitario < 0
   ) {
-
     await showModalError(
       'El precio unitario debe ser un número válido.'
     );
@@ -1147,26 +781,15 @@ async function saveModal() {
   }
 
 
-  // ----------------------------------------------------------
-  // REFERENCIA DUPLICADA
-  // ----------------------------------------------------------
-
-  const duplicate =
-    items.find(item => {
-
-      return (
-        String(item.referencia)
-          .toLowerCase() ===
-        referencia.toLowerCase() &&
-
-        item.id !== editingId
-      );
-
-    });
+  // Verificar referencia duplicada
+  const duplicate = items.find(i =>
+    String(i.referencia)
+      .toLowerCase() === referencia.toLowerCase() &&
+    Number(i.id) !== Number(editingId)
+  );
 
 
   if (duplicate) {
-
     await showModalError(
       'Ya existe una referencia con ese nombre.'
     );
@@ -1175,65 +798,106 @@ async function saveModal() {
   }
 
 
-  // ----------------------------------------------------------
-  // CREAR / ACTUALIZAR
-  // ----------------------------------------------------------
+  // ==========================================================
+  // EDITAR
+  // ==========================================================
 
-  try {
+  if (editingId !== null) {
 
-    if (editingId !== null) {
+    const item = items.find(
+      i => Number(i.id) === Number(editingId)
+    );
 
-      const updated =
-        await apiUpdateItem(
-          editingId,
-          {
-            referencia,
-            descripcion,
-            cantidad,
-            precioUnitario
-          }
-        );
+    if (!item) {
+      return;
+    }
 
 
-      const index =
-        items.findIndex(
-          item => item.id === editingId
-        );
+    const updatedItem = {
+      ...item,
+
+      referencia,
+
+      descripcion,
+
+      cantidad: Math.round(cantidad),
+
+      precioUnitario
+    };
+
+
+    try {
+
+      const savedItem =
+        await apiUpdateItem(updatedItem);
+
+
+      const index = items.findIndex(
+        i => Number(i.id) === Number(editingId)
+      );
 
 
       if (index !== -1) {
-
-        items[index] =
-          updated;
+        items[index] = savedItem;
       }
 
-    } else {
 
-      const created =
-        await apiCreateItem({
-          referencia,
-          descripcion,
-          cantidad,
-          precioUnitario
-        });
+      closeModal();
 
+      render();
 
-      items.push(created);
+    } catch (error) {
+
+      console.error(
+        'Error actualizando item:',
+        error
+      );
+
+      await showModalError(
+        error.message
+      );
     }
+
+
+    return;
+  }
+
+
+  // ==========================================================
+  // CREAR
+  // ==========================================================
+
+  const newItem = {
+
+    referencia,
+
+    descripcion,
+
+    cantidad: Math.round(cantidad),
+
+    precioUnitario
+  };
+
+
+  try {
+
+    const savedItem =
+      await apiCreateItem(newItem);
+
+
+    items.push(savedItem);
 
 
     closeModal();
 
     render();
 
-
   } catch (error) {
 
     console.error(
-      'Error guardando referencia:',
+      'Error creando item:',
       error
     );
-
 
     await showModalError(
       error.message
@@ -1243,7 +907,7 @@ async function saveModal() {
 
 
 // ============================================================
-// DIÁLOGOS
+// Dialog
 // ============================================================
 
 function showDialog({
@@ -1256,9 +920,7 @@ function showDialog({
 
   return new Promise(resolve => {
 
-    dialogResolver =
-      resolve;
-
+    dialogResolver = resolve;
 
     dialogTriggerElement =
       document.activeElement &&
@@ -1268,68 +930,41 @@ function showDialog({
 
 
     const overlay =
-      document.getElementById(
-        'dialogOverlay'
-      );
-
+      document.getElementById('dialogOverlay');
 
     const titleEl =
-      document.getElementById(
-        'dialogTitle'
-      );
-
+      document.getElementById('dialogTitle');
 
     const messageEl =
-      document.getElementById(
-        'dialogMessage'
-      );
-
+      document.getElementById('dialogMessage');
 
     const cancelBtn =
-      document.getElementById(
-        'dialogCancel'
-      );
-
+      document.getElementById('dialogCancel');
 
     const confirmBtn =
-      document.getElementById(
-        'dialogConfirm'
-      );
+      document.getElementById('dialogConfirm');
 
 
-    titleEl.textContent =
-      title;
+    titleEl.textContent = title;
 
+    messageEl.textContent = message;
 
-    messageEl.textContent =
-      message;
+    cancelBtn.textContent = cancelText;
 
-
-    cancelBtn.textContent =
-      cancelText;
-
-
-    confirmBtn.textContent =
-      confirmText;
+    confirmBtn.textContent = confirmText;
 
 
     if (type === 'info') {
 
-      cancelBtn.classList.add(
-        'hidden'
-      );
+      cancelBtn.classList.add('hidden');
 
     } else {
 
-      cancelBtn.classList.remove(
-        'hidden'
-      );
+      cancelBtn.classList.remove('hidden');
     }
 
 
-    overlay
-      .classList
-      .remove('hidden');
+    overlay.classList.remove('hidden');
 
 
     window.setTimeout(() => {
@@ -1344,37 +979,26 @@ function showDialog({
       }
 
     }, 0);
-
   });
 }
 
 
 // ============================================================
-// CERRAR DIÁLOGO
+// Cerrar dialog
 // ============================================================
 
 function closeDialog(result = false) {
-
   const overlay =
-    document.getElementById(
-      'dialogOverlay'
-    );
+    document.getElementById('dialogOverlay');
 
-
-  overlay
-    .classList
-    .add('hidden');
+  overlay.classList.add('hidden');
 
 
   if (dialogResolver) {
 
-    const resolve =
-      dialogResolver;
+    const resolve = dialogResolver;
 
-
-    dialogResolver =
-      null;
-
+    dialogResolver = null;
 
     resolve(result);
   }
@@ -1384,59 +1008,49 @@ function closeDialog(result = false) {
 
     if (
       dialogTriggerElement &&
-      document.contains(
-        dialogTriggerElement
-      )
+      document.contains(dialogTriggerElement)
     ) {
-
       dialogTriggerElement.focus();
     }
 
-
-    dialogTriggerElement =
-      null;
+    dialogTriggerElement = null;
 
   }, 0);
 }
 
 
 // ============================================================
-// ELIMINAR ITEM
+// Eliminar item
 // ============================================================
 
 async function deleteItem(id) {
+  const item = items.find(
+    i => Number(i.id) === Number(id)
+  );
 
-  const item =
-    items.find(
-      i => i.id === id
-    );
-
-
-  if (!item) return;
-
-
-  const ok =
-    await showDialog({
-
-      title:
-        'Confirmar eliminación',
-
-      message:
-        `¿Eliminar la referencia "${item.referencia}"? Esta acción no se puede deshacer.`,
-
-      confirmText:
-        'Eliminar',
-
-      cancelText:
-        'Cancelar',
-
-      type:
-        'confirm'
-
-    });
+  if (!item) {
+    return;
+  }
 
 
-  if (!ok) return;
+  const ok = await showDialog({
+    title: 'Confirmar eliminación',
+
+    message:
+      `¿Eliminar la referencia "${item.referencia}"? ` +
+      'Esta acción no se puede deshacer.',
+
+    confirmText: 'Eliminar',
+
+    cancelText: 'Cancelar',
+
+    type: 'confirm'
+  });
+
+
+  if (!ok) {
+    return;
+  }
 
 
   try {
@@ -1444,22 +1058,19 @@ async function deleteItem(id) {
     await apiDeleteItem(id);
 
 
-    items =
-      items.filter(
-        item => item.id !== id
-      );
+    items = items.filter(
+      i => Number(i.id) !== Number(id)
+    );
 
 
     render();
 
-
   } catch (error) {
 
     console.error(
-      'Error eliminando referencia:',
+      'Error eliminando item:',
       error
     );
-
 
     await showModalError(
       error.message
@@ -1469,160 +1080,110 @@ async function deleteItem(id) {
 
 
 // ============================================================
-// EVENTOS
+// Eventos
 // ============================================================
 
 function bindStaticEvents() {
 
-  // ----------------------------------------------------------
-  // BUSCADOR
-  // ----------------------------------------------------------
-
+  // Buscar
   document
     .getElementById('searchInput')
-    .addEventListener(
-      'input',
-      event => {
+    .addEventListener('input', e => {
 
-        searchTerm =
-          event.target.value;
+      searchTerm = e.target.value;
 
-        render();
-      }
-    );
+      render();
+    });
 
 
-  // ----------------------------------------------------------
-  // AGREGAR
-  // ----------------------------------------------------------
-
+  // Agregar
   document
     .getElementById('btnAdd')
-    .addEventListener(
-      'click',
-      () => openModal()
-    );
+    .addEventListener('click', () => {
+
+      openModal();
+    });
 
 
-  // ----------------------------------------------------------
-  // TABLA
-  // ----------------------------------------------------------
-
+  // Eventos de la tabla
   document
     .getElementById('tableBody')
-    .addEventListener(
-      'click',
-      event => {
+    .addEventListener('click', e => {
 
-        const editBtn =
-          event.target.closest(
-            '.btn-edit'
-          );
+      const editBtn =
+        e.target.closest('.btn-edit');
 
+      const delBtn =
+        e.target.closest('.btn-delete');
 
-        const deleteBtn =
-          event.target.closest(
-            '.btn-delete'
-          );
+      const qtyCell =
+        e.target.closest('.qty-cell');
 
 
-        const qtyCell =
-          event.target.closest(
-            '.qty-cell'
-          );
+      if (editBtn) {
 
-
-        if (editBtn) {
-
-          return openModal(
-            Number(
-              editBtn.dataset.id
-            )
-          );
-        }
-
-
-        if (deleteBtn) {
-
-          return deleteItem(
-            Number(
-              deleteBtn.dataset.id
-            )
-          );
-        }
-
-
-        if (qtyCell) {
-
-          return startQuantityEdit(
-            Number(
-              qtyCell.dataset.id
-            )
-          );
-        }
-
+        return openModal(
+          Number(editBtn.dataset.id)
+        );
       }
-    );
 
 
-  // ----------------------------------------------------------
-  // MODAL
-  // ----------------------------------------------------------
+      if (delBtn) {
 
+        return deleteItem(
+          Number(delBtn.dataset.id)
+        );
+      }
+
+
+      if (qtyCell) {
+
+        return startQuantityEdit(
+          Number(qtyCell.dataset.id)
+        );
+      }
+    });
+
+
+  // Cancelar modal
   document
     .getElementById('btnCancel')
-    .addEventListener(
-      'click',
-      closeModal
-    );
+    .addEventListener('click', closeModal);
 
 
+  // Guardar modal
   document
     .getElementById('btnSave')
-    .addEventListener(
-      'click',
-      saveModal
-    );
+    .addEventListener('click', saveModal);
 
 
+  // Click fuera del modal
   document
     .getElementById('modalOverlay')
-    .addEventListener(
-      'click',
-      event => {
+    .addEventListener('click', e => {
 
-        if (
-          event.target.id ===
-          'modalOverlay'
-        ) {
-
-          closeModal();
-        }
+      if (
+        e.target.id === 'modalOverlay'
+      ) {
+        closeModal();
       }
-    );
+    });
 
 
-  // ----------------------------------------------------------
-  // DIÁLOGO
-  // ----------------------------------------------------------
-
+  // Click fuera del dialog
   document
     .getElementById('dialogOverlay')
-    .addEventListener(
-      'click',
-      event => {
+    .addEventListener('click', e => {
 
-        if (
-          event.target.id ===
-          'dialogOverlay'
-        ) {
-
-          closeDialog(false);
-        }
+      if (
+        e.target.id === 'dialogOverlay'
+      ) {
+        closeDialog(false);
       }
-    );
+    });
 
 
+  // Cancelar dialog
   document
     .getElementById('dialogCancel')
     .addEventListener(
@@ -1631,6 +1192,7 @@ function bindStaticEvents() {
     );
 
 
+  // Confirmar dialog
   document
     .getElementById('dialogConfirm')
     .addEventListener(
@@ -1639,45 +1201,36 @@ function bindStaticEvents() {
     );
 
 
-  // ----------------------------------------------------------
-  // ESCAPE
-  // ----------------------------------------------------------
-
+  // ESC
   document.addEventListener(
     'keydown',
-    event => {
+    e => {
 
       if (
-        event.key === 'Escape' &&
+        e.key === 'Escape' &&
         !document
           .getElementById('modalOverlay')
           .classList
           .contains('hidden')
       ) {
-
         closeModal();
       }
 
 
       if (
-        event.key === 'Escape' &&
+        e.key === 'Escape' &&
         !document
           .getElementById('dialogOverlay')
           .classList
           .contains('hidden')
       ) {
-
         closeDialog(false);
       }
-
     }
   );
 
 
-  // ----------------------------------------------------------
-  // ENTER EN FORMULARIO
-  // ----------------------------------------------------------
-
+  // Enter en campos del formulario
   [
     'fieldReferencia',
     'fieldDescripcion',
@@ -1687,27 +1240,21 @@ function bindStaticEvents() {
 
     document
       .getElementById(id)
-      .addEventListener(
-        'keydown',
-        event => {
+      .addEventListener('keydown', e => {
 
-          if (
-            event.key === 'Enter'
-          ) {
+        if (e.key === 'Enter') {
 
-            event.preventDefault();
+          e.preventDefault();
 
-            saveModal();
-          }
+          saveModal();
         }
-      );
-
+      });
   });
 }
 
 
 // ============================================================
-// INICIAR APLICACIÓN
+// Arrancar aplicación
 // ============================================================
 
 init();
