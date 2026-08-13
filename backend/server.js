@@ -1,12 +1,15 @@
 const express = require('express');
 const cors = require('cors');
-const { db, initDatabase } = require('./db');
+const path = require('path');
+const { pool, initDatabase } = require('./db');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+app.use(express.static(path.join(__dirname, '..', 'src')));
 
 initDatabase();
 
@@ -97,6 +100,10 @@ app.delete('/api/items/:id', (req, res) => {
     }
     res.json({ success: true, id: Number(id) });
   });
+});
+
+app.get('/', (_req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'src', 'index.html'));
 });
 
 app.listen(PORT, '0.0.0.0', () => {
